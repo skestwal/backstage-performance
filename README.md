@@ -8,5 +8,5 @@
 * `kubectl`
 * `helm`
 
-## How to...
+## How to....
 Everything is driven by [`Makefile`](./Makefile). For the details how to do various things see the [`Makefile`](./Makefile)'s inline comments or run `make help`.
