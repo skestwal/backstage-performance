@@ -266,7 +266,6 @@ create_group() {
     [ "$N" -gt "$GROUP_COUNT" ] && N="$GROUP_COUNT"
 
     if [[ "$idx" -eq 1 || "$idx" -gt "$N" ]]; then
-      log_info "Creating top-level group g${idx}" >>"$TMP_DIR/create_group.log"
       groupname="g${idx}"
       while ((attempt <= max_attempts)); do
         token=$(get_token)
@@ -284,7 +283,6 @@ create_group() {
       return 1
     else
       groupname="g$((idx - 1))_1"
-      log_info "Creating nested group $groupname" >>"$TMP_DIR/create_group.log"
       assign_parent_group "$idx" && return
       log_warn "Nested group $groupname creation failed; retrying..." >>"$TMP_DIR/create_group.log"
       return 1
@@ -388,8 +386,18 @@ create_user() {
   [[ $grp -eq 0 ]] && grp=${GROUP_COUNT}
   groups="["
   case $RBAC_POLICY in
-  "$RBAC_POLICY_ALL_GROUPS_ADMIN" | "$RBAC_POLICY_STATIC" | "$RBAC_POLICY_NESTED_GROUPS")
+  "$RBAC_POLICY_ALL_GROUPS_ADMIN" | "$RBAC_POLICY_STATIC")
     groups="$groups\"g${grp}\""
+    ;;
+  "$RBAC_POLICY_NESTED_GROUPS")
+      group_index=$(echo "${user_index}%${GROUP_COUNT}" | bc)
+      [[ $group_index -eq 0 ]] && group_index=${GROUP_COUNT}
+
+      if [[ $group_index -eq 1 || $group_index -gt ${RBAC_POLICY_SIZE:-$GROUP_COUNT} ]]; then
+        groups="$groups\"g${group_index}\""
+      else
+        groups="$groups\"g$((group_index - 1))_1\""
+      fi
     ;;
   "$RBAC_POLICY_USER_IN_MULTIPLE_GROUPS")
     if [ "$user_index" -eq 1 ]; then
