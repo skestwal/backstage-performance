@@ -216,6 +216,33 @@ get_group_id_by_name() {
   fi
 }
 
+get_group_path_by_name() {
+  group_name="$1"
+  token=$(get_token)
+
+  response=$(curl -s -k --location --request GET "$(keycloak_url)/auth/admin/realms/backstage/groups" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" 2>&1)
+
+  if echo "$response" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    group_path=$(echo "$response" | jq -r --arg name "$group_name" '.[] | select(.name==$name) | .path' | head -n1)
+
+    if [ -z "$group_id" ] || [ "$group_id" = "null" ]; then
+      group_path=$(echo "$response" | jq -r --arg name "$group_name" '
+        [.. | objects | select(has("name") and .name==$name)] | .[0].path // empty
+      ' | head -n1)
+    fi
+
+    if [ -n "$group_path" ] && [ "$group_path" != "null" ]; then
+      echo "$group_path"
+    else
+      return 1
+    fi
+  else
+    return 1
+  fi
+}
+
 assign_parent_group() {
   local idx="${1}"  # 2..N
   if [ "$idx" -eq 2 ]; then
@@ -396,7 +423,7 @@ create_user() {
       if [[ $group_index -eq 1 || $group_index -gt ${RBAC_POLICY_SIZE:-$GROUP_COUNT} ]]; then
         groups="$groups\"g${group_index}\""
       else
-        groups="$groups\"g$((group_index - 1))_1\""
+        groups="$groups\"$(get_group_path_by_name "g$((group_index - 1))_1")\""
       fi
     ;;
   "$RBAC_POLICY_USER_IN_MULTIPLE_GROUPS")
@@ -572,5 +599,5 @@ get_token() {
   rm -rf "$token_lockfile"
 }
 
-export -f keycloak_url backstage_url get_token keycloak_token rhdh_token create_rbac_policy create_group create_user log log_info log_warn log_error log_token log_token_info log_token_err get_group_id_by_name assign_parent_group
+export -f keycloak_url backstage_url get_token keycloak_token rhdh_token create_rbac_policy create_group create_user log log_info log_warn log_error log_token log_token_info log_token_err get_group_id_by_name get_group_path_by_name assign_parent_group
 export kc_lockfile bs_lockfile token_lockfile
