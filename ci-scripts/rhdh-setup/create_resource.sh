@@ -189,44 +189,72 @@ create_cmp() {
   envsubst '${grp_indx} ${cmp_indx}' <"$WORKDIR/template/component/component.template" >>"$TMP_DIR/component-$shard_indx.yaml"
 }
 
-get_group_path_by_name() {
-  local input="$1"
-
-  local group_name="$input"
+cache_all_groups() {
   token=$(get_token)
+  groups_cache_file="$TMP_DIR/all_groups_cache.json"
 
-  response=$(curl -s -k --location --request GET "$(keycloak_url)/auth/admin/realms/backstage/groups?search=${group_name}" \
+  log_info "Caching all groups for user creation..." >>"$TMP_DIR/create_user.log"
+
+  response=$(curl -s -k --location --request GET "$(keycloak_url)/auth/admin/realms/backstage/groups" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $token" 2>&1)
+
+  if [[ "$response" == "["* ]] && [[ "$response" == *"]" ]]; then
+    echo "$response" > "$groups_cache_file"
+    log_info "Groups cached successfully to $groups_cache_file" >>"$TMP_DIR/create_user.log"
+    return 0
+  else
+    log_error "Failed to cache groups: $response" >>"$TMP_DIR/create_user.log"
+    return 1
+  fi
+}
+
+search_group_by_name() {
+  local group_name="$1"
+  local token=$(get_token)
+
+  local response=$(curl -s -k --location --request GET "$(keycloak_url)/auth/admin/realms/backstage/groups?search=${group_name}" \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer $token" 2>&1)
 
   if [[ "$response" == "["* ]] && [[ "$response" == *"]" ]] && [[ "$response" != "[]" ]]; then
-    group_path=$(echo "$response" | jq -r --stream --arg name "$group_name" '
-      [., inputs] |
-      map(select(.[0][-1] == "name" and .[1] == $name) | .[0][:-1]) as $paths |
-      if $paths | length > 0 then
-        map(select(.[0] == ($paths[0] + ["path"]))) | .[0][1]
-      else empty end
-    ')
-    if [ -n "$group_path" ] && [ "$group_path" != "null" ]; then
-      echo "$group_path"
-    else
-      return 1
-    fi
+    echo "$response"
   else
     return 1
   fi
 }
 
-get_group_id_by_name() {
+get_group_path_by_name() {
   group_name="$1"
-  token=$(get_token)
+  groups_cache_file="$TMP_DIR/all_groups_cache.json"
 
-  response=$(curl -s -k --location --request GET "$(keycloak_url)/auth/admin/realms/backstage/groups?search=${group_name}" \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer $token" 2>&1)
-  
-  if [[ "$response" == "["* ]] && [[ "$response" == *"]" ]] && [[ "$response" != "[]" ]]; then
-    group_id=$(echo "$response" | jq -r --stream --arg name "$group_name" '
+  if [ ! -f "$groups_cache_file" ]; then
+    log_error "Groups cache file not found: $groups_cache_file" >>"$TMP_DIR/create_user.log"
+    return 1
+  fi
+
+  group_path=$(cat "$groups_cache_file" | jq -r --stream --arg name "$group_name" '
+    [., inputs] |
+    map(select(.[0][-1] == "name" and .[1] == $name) | .[0][:-1]) as $paths |
+    if $paths | length > 0 then
+      map(select(.[0] == ($paths[0] + ["path"]))) | .[0][1]
+    else empty end
+  ')
+
+  if [ -n "$group_path" ] && [ "$group_path" != "null" ]; then
+    echo "$group_path"
+  else
+    return 1
+  fi
+}
+
+
+get_group_id_by_name() {
+  local group_name="$1"
+  local response=$(search_group_by_name "$group_name")
+
+  if [ $? -eq 0 ]; then
+    local group_id=$(echo "$response" | jq -r --stream --arg name "$group_name" '
       [., inputs] |
       map(select(.[0][-1] == "name" and .[1] == $name) | .[0][:-1]) as $paths |
       if $paths | length > 0 then
@@ -404,6 +432,18 @@ create_groups() {
   fi
 }
 
+create_users() {
+  log_info "Creating Users in Keycloak"
+  export GROUP_COUNT
+
+  cache_all_groups
+  if [ $? -ne 0 ]; then
+    log_error "Failed to cache groups. Aborting user creation."
+    return 1
+  fi
+  seq 1 "${BACKSTAGE_USER_COUNT}" | xargs -n1 -P"${POPULATION_CONCURRENCY}" bash -c 'create_user'
+}
+
 create_user() {
   max_attempts=5
   attempt=1
@@ -419,11 +459,11 @@ create_user() {
     [[ $grp -eq 0 ]] && grp=${GROUP_COUNT}
     if [[ $grp -eq 1 || $grp -gt ${RBAC_POLICY_SIZE} ]]; then
       groups="$groups\"g${grp}\""
-    else
-      group_name="g$((grp - 1))_1"
-      group_path=$(get_group_path_by_name "$group_name")
-      groups="$groups\"$group_path\""
-    fi
+      else
+        group_name="g$((grp - 1))_1"
+        group_path=$(get_group_path_by_name "$group_name")
+        groups="$groups\"$group_path\""
+      fi
     ;;
   "$RBAC_POLICY_USER_IN_MULTIPLE_GROUPS")
     if [ "$user_index" -eq 1 ]; then
@@ -598,5 +638,5 @@ get_token() {
   rm -rf "$token_lockfile"
 }
 
-export -f keycloak_url backstage_url get_token keycloak_token rhdh_token create_rbac_policy create_group create_user log log_info log_warn log_error log_token log_token_info log_token_err get_group_id_by_name assign_parent_group get_group_path_by_name
+export -f keycloak_url backstage_url get_token keycloak_token rhdh_token create_rbac_policy create_group create_users create_user log log_info log_warn log_error log_token log_token_info log_token_err get_group_id_by_name assign_parent_group get_group_path_by_name search_group_by_name cache_all_groups
 export kc_lockfile bs_lockfile token_lockfile
