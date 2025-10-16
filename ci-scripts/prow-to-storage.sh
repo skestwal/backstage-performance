@@ -10,7 +10,7 @@ HORREUM_TEST_OWNER="rhdh-perf-test-team"
 HORREUM_TEST_ACCESS="PUBLIC"
 
 function _log() {
-    echo "$(date -Ins --utc) $1 $2" >&1
+    echo "$(date -u +'%Y-%m-%dT%H:%M:%S.%N+00:00') $1 $2" >&1
 }
 
 function debug() {
