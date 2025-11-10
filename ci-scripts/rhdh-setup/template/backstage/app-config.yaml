@@ -23,11 +23,11 @@ catalog:
         groupQuerySize: 1000
         schedule:
           frequency: 
-            minutes: 30
+            hours: 2
           timeout: 
             minutes: 1
           initialDelay: 
-            seconds: 15
+            minutes: 1
 techdocs:
   builder: local
   generator:
