@@ -35,11 +35,20 @@ gather_pod_logs() {
     echo -e "\nCollecting logs from pods in '$namespace' namespace:"
     for pod in $pods; do
         echo "$pod"
-        logfile_prefix="$log_dir/${pod##*/}"
-        echo -e " -> $logfile_prefix.log"
-        $cli -n "$namespace" logs "$pod" --tail=-1 >&"$logfile_prefix.log" || true
-        echo -e " -> $logfile_prefix.previous.log"
-        $cli -n "$namespace" logs "$pod" --tail=-1 --previous=true >&"$logfile_prefix.previous.log" || true
+        containers=$($cli -n "$namespace" get pod "$pod" -o json | jq -r '.spec.containers[].name')
+        if $cli -n "$namespace" get pod "$pod" -o json | jq -e '.spec.initContainers? // empty' > /dev/null; then
+            init_containers=$($cli -n "$namespace" get pod "$pod" -o json | jq -r '.spec.initContainers[].name // empty')
+        else
+            init_containers=""
+        fi
+        all_containers="$containers $init_containers"
+        for container in $all_containers; do
+            logfile_prefix="$log_dir/${pod##*/}.$container"
+            echo -e " -> $logfile_prefix.log"
+            $cli -n "$namespace" logs "$pod" -c "$container" --tail=-1 >&"$logfile_prefix.log" || true
+            echo -e " -> $logfile_prefix.previous.log"
+            $cli -n "$namespace" logs "$pod" -c "$container" --tail=-1 --previous=true >&"$logfile_prefix.previous.log" || true
+        done
     done
 }
 
@@ -50,7 +59,7 @@ gather_pod_logs "${ARTIFACT_DIR}/locust-logs" "$pods" "$LOCUST_NAMESPACE"
 
 pods=""
 for label in app.kubernetes.io/name=developer-hub app.kubernetes.io/name=postgresql; do
-    for pod in $($clin get pods -l "$label" -o name); do
+    for pod in $($clin get pods -l "$label" -o jsonpath='{.items[*].metadata.name}'); do
         pods="$pods $pod"
     done
 done
@@ -95,8 +104,10 @@ try_gather_file "${TMP_DIR}/create_group.log"
 try_gather_file "${TMP_DIR}/create_user.log"
 try_gather_file "${TMP_DIR}/get_token.log"
 try_gather_file "${TMP_DIR}/get_rhdh_token.log"
-try_gather_file "${TMP_DIR}/get_api_count.log"
+try_gather_file "${TMP_DIR}/get_user_count.log"
+try_gather_file "${TMP_DIR}/get_group_count.log"
 try_gather_file "${TMP_DIR}/get_component_count.log"
+try_gather_file "${TMP_DIR}/get_api_count.log"
 try_gather_file "${TMP_DIR}/rbac-config.yaml"
 try_gather_file "${TMP_DIR}/locust-k8s-operator.values.yaml"
 try_gather_file load-test.log
